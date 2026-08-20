@@ -434,6 +434,236 @@
 \end{frame}
 
 %============================================================== 8
+\begin{frame}{Inside a Transformer: the assembly line}
+  \begin{block}{The recipe}
+    Turn each token into a vector, then run it through the \textbf{same
+    two-step block}, many times over --- always in parallel across the
+    whole sequence.
+  \end{block}
+  \begin{center}
+  \begin{tikzpicture}[node distance=5mm, scale=0.78, transform shape]
+    \node[tok, visible on=<2->] (t) {tokens};
+    \node[box, right=of t, visible on=<3->] (emb) {Embedding};
+
+    \node[obox, right=14mm of emb, minimum width=2.3cm, visible on=<4->]
+         (attn) {Attention};
+    \node[gbox, below=3mm of attn, minimum width=2.3cm, visible on=<5->]
+         (mlp) {MLP};
+    \node[draw=nngray, dashed, rounded corners=4pt, fit=(attn)(mlp),
+          inner sep=3mm, visible on=<5->] (blk) {};
+    \node[lbl, below=1mm of blk.south, visible on=<6->] {repeated $\sim$96$\times$};
+
+    \node[box, right=16mm of blk, fill=nnblue, text=white, visible on=<7->]
+         (unemb) {Unembed\\+softmax};
+    \node[tok, right=of unemb, fill=nnmint, draw=nngreen, visible on=<7->]
+         (out) {tunnel (41\%)};
+
+    \draw[ar, visible on=<3->] (t) -- (emb);
+    \draw[ar, visible on=<4->] (emb) -- (attn);
+    \draw[ar, visible on=<5->] (attn) -- (mlp);
+    \draw[ar, visible on=<7->] (blk) -- (unemb);
+    \draw[ar, visible on=<7->] (unemb) -- (out);
+  \end{tikzpicture}
+  \end{center}
+  \uncover<8->{\centering\small\color{nngray}
+  Only the \textbf{last} position's output vector is used to pick the next
+  token.}
+\end{frame}
+
+%============================================================== 9
+\begin{frame}{Queries and keys: who's relevant to whom}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.46\textwidth}
+      \small
+      Every vector produces two small vectors, via learned matrices
+      $W_Q$ and $W_K$:
+      \begin{itemize}
+        \item<2-> A \alert{query} --- ``what am I looking for?''
+        \item<3-> A \alert{key} --- ``what do I have to offer?''
+        \item<4-> \textbf{Query $\cdot$ Key} $=$ how relevant that word is to
+              me
+      \end{itemize}
+      \medskip
+      \uncover<5->{%
+      \begin{exampleblock}{Example}
+        \small ``fluffy'' and ``blue'' \textbf{query} for a preceding noun;
+        ``creature'' \textbf{holds the key} that answers them.
+      \end{exampleblock}}
+    \end{column}
+    \begin{column}{0.52\textwidth}
+      \centering
+      \begin{tikzpicture}[node distance=2.4mm, scale=0.85, transform shape]
+        \node[tok] (w1) {The};
+        \node[tok, right=of w1] (w2) {fluffy};
+        \node[tok, right=of w2] (w3) {blue};
+        \node[tok, right=of w3, fill=nnmint, draw=nngreen, thick] (w4) {creature};
+
+        \node[obox, below=16mm of w2, minimum width=1.3cm, visible on=<2->]
+             (q2) {\tiny query};
+        \node[obox, below=16mm of w3, minimum width=1.3cm, visible on=<2->]
+             (q3) {\tiny query};
+        \node[gbox, below=16mm of w4, minimum width=1.3cm, visible on=<3->]
+             (k4) {\tiny key};
+
+        \draw[thinar, visible on=<2->] (w2) -- (q2);
+        \draw[thinar, visible on=<2->] (w3) -- (q3);
+        \draw[thinar, visible on=<3->] (w4) -- (k4);
+
+        \draw[ar, draw=nngreen, thick, visible on=<4->]
+          (k4.south) to[bend right=20] (q3.south);
+        \draw[ar, draw=nngreen, thick, visible on=<4->]
+          (k4.south) to[bend right=30] (q2.south);
+        \node[font=\scriptsize, text=nngreen, visible on=<4->]
+             at ($(k4)!0.5!(q2)+(0,-1.0)$) {high score};
+      \end{tikzpicture}
+
+      \vspace{4mm}
+      \small\color{nngray}
+      \uncover<4->{A big dot product between a query and a key means
+      \textbf{``pay attention to this''}.}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+%============================================================== 10
+\begin{frame}{From scores to an updated meaning}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.44\textwidth}
+      \small
+      \begin{itemize}
+        \item<2-> \textbf{Softmax} turns raw scores into weights that
+              \textbf{sum to 1} for each word
+        \item<3-> \alert{Masking}: a word may only attend to words \textbf{at
+              or before} it --- no peeking at the future
+        \item<4-> Every word also makes a \textbf{value} vector via $W_V$:
+              ``if you attend to me, here's what to add''
+        \item<5-> New embedding $=$ old embedding $+$ \textbf{weighted sum}
+              of values
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.52\textwidth}
+      \centering
+      \begin{tikzpicture}[scale=0.62, transform shape]
+        \foreach \w [count=\i from 0] in {The,fluffy,blue,creature}{
+          \node[font=\scriptsize, visible on=<2->] at (\i*1.05+0.5, 4.55) {\w};
+          \node[font=\scriptsize, anchor=east, visible on=<2->]
+               at (-0.15, 3.65-\i*1.05) {\w};
+        }
+        \foreach \r in {0,...,3}{ \foreach \c in {0,...,3}{
+          \draw[gray!30, line width=0.2pt, visible on=<2->]
+            (\c*1.05,3.15-\r*1.05) rectangle (\c*1.05+1.0,4.15-\r*1.05);
+        }}
+        \foreach \r/\c/\opac in {0/0/85, 1/0/25,1/1/75, 2/0/10,2/1/20,2/2/70,
+                              3/0/5,3/1/55,3/2/10,3/3/30}{
+          \fill[nnblue!\opac, visible on=<2->]
+            (\c*1.05,3.15-\r*1.05) rectangle (\c*1.05+1.0,4.15-\r*1.05);
+        }
+        \node[font=\scriptsize\itshape, text=nnred, visible on=<3->,
+              align=center] at (2.6,3.6) {masked:\\blank};
+        \draw[nnred, thick, visible on=<5->] (0,0) rectangle (4.0,1.0);
+      \end{tikzpicture}
+
+      \smallskip
+      \small\color{nngray}
+      \uncover<5->{\textbf{creature}'s row: mostly itself, plus a strong pull
+      from \textbf{fluffy} and \textbf{blue}.}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+%============================================================== 11
+\begin{frame}{Many heads, many questions}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.47\textwidth}
+      \small
+      One head can only ask \textbf{one kind of question} at a time.
+      \begin{itemize}
+        \item<2-> Run many \alert{heads} \textbf{in parallel}, each with its
+              own $W_Q, W_K, W_V$
+        \item<3-> One head tracks adjectives, another tracks pronouns, another
+              tracks \dots whatever training finds useful
+        \item<4-> Every head's output is \textbf{concatenated}, then mixed
+              back down by an output matrix $W_O$
+      \end{itemize}
+      \medskip
+      \uncover<5->{%
+      \begin{exampleblock}{GPT-3, one block}
+        \textbf{96 heads}, run side by side, in every one of \textbf{96
+        blocks}.
+      \end{exampleblock}}
+    \end{column}
+    \begin{column}{0.49\textwidth}
+      \centering
+      \begin{tikzpicture}[node distance=3mm, scale=0.82, transform shape]
+        \node[tok] (w) {creature};
+        \node[obox, below=10mm of w, xshift=-2.1cm, minimum width=1.5cm,
+              visible on=<2->] (h1) {\tiny head 1\\\tiny adjectives};
+        \node[obox, below=10mm of w, minimum width=1.5cm, visible on=<2->]
+             (h2) {\tiny head 2\\\tiny pronouns};
+        \node[obox, below=10mm of w, xshift=2.1cm, minimum width=1.5cm,
+              visible on=<2->] (h3) {\tiny head 3\\\tiny \dots};
+        \draw[thinar, visible on=<2->] (w) -- (h1);
+        \draw[thinar, visible on=<2->] (w) -- (h2);
+        \draw[thinar, visible on=<2->] (w) -- (h3);
+        \node[gbox, below=13mm of h2, minimum width=5.4cm, visible on=<4->]
+             (cat) {concat $\rightarrow$ $W_O$};
+        \draw[ar, visible on=<4->] (h1) -- (cat);
+        \draw[ar, visible on=<4->] (h2) -- (cat);
+        \draw[ar, visible on=<4->] (h3) -- (cat);
+      \end{tikzpicture}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+%============================================================== 12
+\begin{frame}{MLP blocks: where facts might live}
+  \begin{columns}[T,onlytextwidth]
+    \begin{column}{0.47\textwidth}
+      \small
+      After attention mixes context in, each vector goes through the
+      \textbf{same} feed-forward step, \textbf{on its own} --- no looking at
+      other words this time.
+      \begin{itemize}
+        \item<2-> \textbf{Up-project} into a much bigger space (GPT-3:
+              $12{,}288 \rightarrow 49{,}152$)
+        \item<3-> A simple non-linearity, then \textbf{down-project} back
+        \item<4-> This is where a lot of memorised \textbf{facts} appear to
+              live, as directions in that space
+      \end{itemize}
+      \medskip
+      \uncover<5->{%
+      \begin{exampleblock}{A toy fact}
+        ``Michael Jordan plays the sport of \rule{6mm}{0.4pt}'' activates a
+        direction that pushes toward \textbf{basketball}.
+      \end{exampleblock}}
+    \end{column}
+    \begin{column}{0.49\textwidth}
+      \centering
+      \begin{tikzpicture}[scale=0.82, transform shape]
+        \node[tok] (in) {vector in};
+        \node[box, below=8mm of in, minimum width=1.6cm, visible on=<2->]
+             (up) {up-project};
+        \node[rbox, below=8mm of up, minimum width=2.6cm, visible on=<3->]
+             (act) {non-linearity};
+        \node[box, below=8mm of act, minimum width=1.6cm, visible on=<3->]
+             (down) {down-project};
+        \node[tok, below=8mm of down, fill=nnmint, draw=nngreen,
+              visible on=<4->] (out) {vector out};
+        \draw[ar, visible on=<2->] (in) -- (up);
+        \draw[ar, visible on=<3->] (up) -- (act);
+        \draw[ar, visible on=<3->] (act) -- (down);
+        \draw[ar, visible on=<4->] (down) -- (out);
+      \end{tikzpicture}
+
+      \smallskip
+      \small\color{nngray}
+      \uncover<4->{Roughly \textbf{two-thirds} of a large model's parameters
+      live in these MLP layers.}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+%============================================================== 13
 \begin{frame}{So what makes it ``large''?}
   \begin{block}{Nothing new is invented at the top}
     Same neurons. Same downhill walk. Same attention. Just \textbf{more}.
@@ -478,7 +708,7 @@
   explicitly programmed.}
 \end{frame}
 
-%============================================================== 9
+%============================================================== 14
 \begin{frame}{The core mechanic}
   \begin{block}{After all that machinery, the output is one thing}
     A \textbf{probability distribution} over the next token. That is the
@@ -521,7 +751,7 @@
   \end{columns}
 \end{frame}
 
-%============================================================== 10
+%============================================================== 15
 \begin{frame}{The journey, in one slide}
   \begin{columns}[T,onlytextwidth]
     \begin{column}{0.478\textwidth}
@@ -566,7 +796,7 @@
   \end{exampleblock}
 \end{frame}
 
-%============================================================== 11
+%============================================================== 16
 \begin{frame}[plain]
   \transfade
   \vfill
