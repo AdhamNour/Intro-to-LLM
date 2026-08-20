@@ -1,0 +1,28 @@
+# LaTeX build artifacts
+*.aux
+*.log
+*.nav
+*.out
+*.snm
+*.toc
+*.vrb
+*.bbl
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.synctex.gz
+*.run.xml
+*.xdv
+*.figlist
+*.makefile
+*.auxlock
+*.dvi
+
+# Compiled PDF (built by CI and attached to releases)
+*.pdf
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
